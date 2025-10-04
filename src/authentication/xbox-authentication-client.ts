@@ -5,7 +5,6 @@ import { KeyedExpiryTokenCache } from "../util/keyed-expiry-token-cache";
 import { ExpiryTokenCache } from "../util/expiry-token-cache";
 import { FetchFunction, defaultFetch } from "../util/fetch-function";
 import { RequestError } from "../util/request-error";
-import { unauthorizedRetryPolicy } from "../core/request-policy";
 
 export enum RelyingParty {
   Xbox = "http://xboxlive.com",
@@ -121,28 +120,23 @@ export class XboxAuthenticationClient {
     let xstsTicket = await this.xstsTicketCache.getExistingToken(relyingParty);
     if (!xstsTicket) {
       let userToken = await this.userTokenCache.getExistingToken();
-      const xstsTicketFailureHandler = unauthorizedRetryPolicy.onFailure(
-        async ({ handled }) => {
-          if (handled) {
-            // Clear from memory
-            this.userTokenCache.clearToken();
-            // Clear from storage
-            await (await this.tokenPersisterOrPromise)?.clear("xbox.userToken");
-            userToken = null;
-          }
+
+      try {
+        if (!userToken) {
+          // Ouath2 token depends on nothing, so we can fetch it without
+          // worrying if it is expired.
+          const oauthToken = await getOauth2AccessToken();
+          userToken = await this.userTokenCache.getToken(oauthToken);
         }
-      );
-      xstsTicket = await unauthorizedRetryPolicy
-        .execute(async () => {
-          if (!userToken) {
-            // Ouath2 token depends on nothing, so we can fetch it without
-            // worrying if it is expired.
-            const oauthToken = await getOauth2AccessToken();
-            userToken = await this.userTokenCache.getToken(oauthToken);
-          }
-          return this.xstsTicketCache.getToken(relyingParty, userToken.Token);
-        })
-        .finally(() => xstsTicketFailureHandler.dispose());
+        return this.xstsTicketCache.getToken(relyingParty, userToken.Token);
+      } catch (error) {
+        // Clear from memory
+        this.userTokenCache.clearToken();
+        // Clear from storage
+        await (await this.tokenPersisterOrPromise)?.clear("xbox.userToken");
+        userToken = null;
+        throw error;
+      }
     }
     return xstsTicket;
   }

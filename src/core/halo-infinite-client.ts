@@ -24,7 +24,6 @@ import {
   ProgressionFileType,
   ProgressionFileTypeMap,
 } from "../models/halo-infinite/progression-file";
-import { unauthorizedRetryPolicy } from "./request-policy";
 import { BanSummary } from "../models/halo-infinite/ban-summary";
 import { KeyedExpiryTokenCache } from "../util/keyed-expiry-token-cache";
 import { DateTime } from "luxon";
@@ -104,40 +103,32 @@ export class HaloInfiniteClient {
   ) {}
 
   private async executeRequest(url: string, init: RequestInit) {
-    const failureHandler = unauthorizedRetryPolicy.onFailure(
-      async ({ handled }) => {
-        if (handled) {
-          await this.spartanTokenProvider.clearSpartanToken();
-        }
-      }
-    );
     try {
-      return await unauthorizedRetryPolicy.execute(async () => {
-        const headers = new Headers(init.headers);
-        if (!headers.has("User-Agent")) {
-          headers.set("User-Agent", GlobalConstants.HALO_PC_USER_AGENT);
-        }
-        if (!headers.has("Accept")) {
-          headers.set("Accept", "application/json");
-        }
-        headers.set(
-          "x-343-authorization-spartan",
-          await this.spartanTokenProvider.getSpartanToken()
-        );
+      const headers = new Headers(init.headers);
+      if (!headers.has("User-Agent")) {
+        headers.set("User-Agent", GlobalConstants.HALO_PC_USER_AGENT);
+      }
+      if (!headers.has("Accept")) {
+        headers.set("Accept", "application/json");
+      }
+      headers.set(
+        "x-343-authorization-spartan",
+        await this.spartanTokenProvider.getSpartanToken()
+      );
 
-        const response = await this.fetchFn(url, {
-          ...init,
-          headers,
-        });
-
-        if (!response.ok) {
-          throw new RequestError(url, response);
-        }
-
-        return response;
+      const response = await this.fetchFn(url, {
+        ...init,
+        headers,
       });
-    } finally {
-      failureHandler.dispose();
+
+      if (!response.ok) {
+        throw new RequestError(url, response);
+      }
+
+      return response;
+    } catch (error) {
+      await this.spartanTokenProvider.clearSpartanToken();
+      throw error;
     }
   }
 
