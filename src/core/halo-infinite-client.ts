@@ -32,6 +32,7 @@ import { wrapPlayerId, unwrapPlayerId } from "../util/xuid";
 import { SeasonCalendarContainer } from "../models/halo-infinite/season";
 import { Settings } from "../models/halo-infinite/settings";
 import { MatchCount } from "src/models/halo-infinite/match-count";
+import { LobbyPresence } from "src/models/halo-infinite/lobby-presence";
 
 export interface ResultContainer<TValue> {
   Id: string;
@@ -41,6 +42,10 @@ export interface ResultContainer<TValue> {
 
 export interface ResultsContainer<TValue> {
   Value: ResultContainer<TValue>[];
+}
+
+export interface LobbyResultsContainer<TValue> {
+  Results: ResultContainer<TValue>[];
 }
 
 interface PaginationContainer<TValue> {
@@ -510,4 +515,29 @@ export class HaloInfiniteClient {
       },
       true
     );
+
+  public getLobbyPresence = async (xuids: string[], init?: Omit<RequestInit, "body" | "method">) => {
+    let resultsContainer: LobbyResultsContainer<LobbyPresence>;
+    try {
+      resultsContainer = await this.executeJsonRequest<LobbyResultsContainer<LobbyPresence>>(
+        `https://${HaloCoreEndpoints.LobbyOrigin}.${HaloCoreEndpoints.ServiceDomain}/hi/presence`,
+        {
+          ...init,
+          method: "post",
+          body: JSON.stringify({ Xuids: xuids.map(unwrapPlayerId) }),
+        }
+      );
+    } catch (e) {
+      if (e instanceof RequestError && e.response.status === 404) {
+        const contentLength = e.response.headers.get("Content-Length");
+        if (contentLength && parseInt(contentLength) > 0) {
+          // 404s if even one of the xuids is invalid
+          resultsContainer = (await e.response.json()) as LobbyResultsContainer<LobbyPresence>;
+        }
+      }
+
+      throw e;
+    }
+    return resultsContainer.Results;
+  }
 }
